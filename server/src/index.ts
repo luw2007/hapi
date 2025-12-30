@@ -14,6 +14,7 @@ import { SyncEngine, type SyncEvent } from './sync/syncEngine'
 import { NotificationHub } from './notifications/notificationHub'
 import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
+import { LarkWipNotifier } from './lark/larkWipNotifier'
 import { startWebServer } from './web/server'
 import { getOrCreateJwtSecret } from './web/jwtSecret'
 import { createSocketServer } from './socket/server'
@@ -40,6 +41,7 @@ function formatSource(source: ConfigSource | 'generated'): string {
 
 let syncEngine: SyncEngine | null = null
 let happyBot: HappyBot | null = null
+let larkNotifier: LarkWipNotifier | null = null
 let webServer: BunServer<WebSocketData> | null = null
 let sseManager: SSEManager | null = null
 let notificationHub: NotificationHub | null = null
@@ -71,6 +73,18 @@ async function main() {
     console.log(`[Server] WEBAPP_PORT: ${config.webappPort} (${formatSource(config.sources.webappPort)})`)
     console.log(`[Server] WEBAPP_URL: ${config.miniAppUrl} (${formatSource(config.sources.webappUrl)})`)
 
+    if (!config.larkEnabled) {
+        console.log('[Server] Lark: disabled (LARK_ENABLED not set/false)')
+    } else {
+        const enabledSource = formatSource(config.sources.larkEnabled)
+        const targetsSource = formatSource(config.sources.larkNotifyTargets)
+        const targets = config.larkNotifyTargets.length > 0 ? config.larkNotifyTargets.join(', ') : '(default)'
+        const appIdSource = formatSource(config.sources.larkAppId)
+        const appSecretSource = formatSource(config.sources.larkAppSecret)
+        const vtSource = formatSource(config.sources.larkVerificationToken)
+        console.log(`[Server] Lark: enabled (${enabledSource}), targets: ${targets} (${targetsSource}), APP_ID: ${config.larkAppId ? 'set' : 'missing'} (${appIdSource}), APP_SECRET: ${config.larkAppSecret ? 'set' : 'missing'} (${appSecretSource}), WEBHOOK_TOKEN: ${config.larkVerificationToken ? 'set' : 'missing'} (${vtSource})`)
+    }
+
     if (!config.telegramEnabled) {
         console.log('[Server] Telegram: disabled (no TELEGRAM_BOT_TOKEN)')
     } else {
@@ -98,9 +112,18 @@ async function main() {
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager)
 
-    const notificationChannels: NotificationChannel[] = [
-        new PushNotificationChannel(pushService, config.miniAppUrl)
-    ]
+    // Initialize Lark notifier (WIP: log-only)
+    if (config.larkEnabled) {
+        larkNotifier = new LarkWipNotifier({
+            syncEngine,
+            miniAppUrl: config.miniAppUrl,
+            notifyTargets: config.larkNotifyTargets,
+            appId: config.larkAppId,
+            appSecret: config.larkAppSecret,
+            actionSecret: config.larkActionSecret,
+        })
+        larkNotifier.start()
+    }
 
     // Initialize Telegram bot (optional)
     if (config.telegramEnabled && config.telegramBotToken) {
@@ -136,7 +159,7 @@ async function main() {
     const shutdown = async () => {
         console.log('\nShutting down...')
         await happyBot?.stop()
-        notificationHub?.stop()
+        larkNotifier?.stop()
         syncEngine?.stop()
         sseManager?.stop()
         webServer?.stop()

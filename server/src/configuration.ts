@@ -11,7 +11,12 @@
  * - WEBAPP_PORT: Port for Mini App HTTP server (default: 3006)
  * - WEBAPP_URL: Public URL for Telegram Mini App
  * - CORS_ORIGINS: Comma-separated CORS origins
- * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@hapi.run)
+ * - LARK_ENABLED: Enable Lark (Feishu) WIP notifier (true/false)
+ * - LARK_NOTIFY_TARGETS: Comma-separated target identifiers for logging (WIP)
+ * - APP_ID: Lark (Feishu) App ID (WIP)
+ * - APP_SECRET: Lark (Feishu) App Secret (WIP)
+ * - LARK_VERIFICATION_TOKEN: Lark webhook verification token
+ * - LARK_ACTION_SECRET: Secret for signing Lark URL actions (default: CLI_API_TOKEN)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
  */
@@ -30,6 +35,15 @@ export interface ConfigSources {
     webappUrl: ConfigSource
     corsOrigins: ConfigSource
     cliApiToken: 'env' | 'file' | 'generated'
+
+    larkEnabled: ConfigSource
+    larkNotifyTargets: ConfigSource
+
+    larkAppId: ConfigSource
+    larkAppSecret: ConfigSource
+
+    larkVerificationToken: ConfigSource
+    larkActionSecret: ConfigSource
 }
 
 class Configuration {
@@ -66,6 +80,24 @@ class Configuration {
     /** Allowed CORS origins for Mini App + Socket.IO (comma-separated env override) */
     public readonly corsOrigins: string[]
 
+    /** Lark (Feishu) notification enabled (WIP) */
+    public readonly larkEnabled: boolean
+
+    /** Lark (Feishu) notification targets (WIP, only used for logging now) */
+    public readonly larkNotifyTargets: string[]
+
+    /** Lark (Feishu) App ID (WIP) */
+    public readonly larkAppId: string | null
+
+    /** Lark (Feishu) App Secret (WIP) */
+    public readonly larkAppSecret: string | null
+
+    /** Lark (Feishu) webhook verification token */
+    public readonly larkVerificationToken: string | null
+
+    /** Lark (Feishu) URL action signing secret */
+    public larkActionSecret: string
+
     /** Sources of each configuration value */
     public readonly sources: ConfigSources
 
@@ -86,6 +118,16 @@ class Configuration {
         this.webappPort = serverSettings.webappPort
         this.miniAppUrl = serverSettings.webappUrl
         this.corsOrigins = serverSettings.corsOrigins
+
+        this.larkEnabled = serverSettings.larkEnabled
+        this.larkNotifyTargets = serverSettings.larkNotifyTargets
+
+        this.larkAppId = serverSettings.larkAppId
+        this.larkAppSecret = serverSettings.larkAppSecret
+
+        this.larkVerificationToken = serverSettings.larkVerificationToken
+        // Will be finalized in _setCliApiToken() (fallback to CLI_API_TOKEN)
+        this.larkActionSecret = serverSettings.larkActionSecret ?? ''
 
         // CLI API token - will be set by _setCliApiToken() before create() returns
         this.cliApiToken = ''
@@ -148,6 +190,12 @@ class Configuration {
         this.cliApiTokenSource = source
         this.cliApiTokenIsNew = isNew
         ;(this.sources as { cliApiToken: string }).cliApiToken = source
+
+        // Default Lark URL action signing secret to CLI_API_TOKEN if not explicitly set.
+        if (!this.larkActionSecret) {
+            this.larkActionSecret = token
+            ;(this.sources as { larkActionSecret?: string }).larkActionSecret = 'default'
+        }
     }
 }
 
