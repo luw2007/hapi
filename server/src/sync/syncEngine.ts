@@ -197,11 +197,73 @@ export class SyncEngine {
         return this.machineCache.getOrCreateMachine(id, metadata, daemonState, namespace)
     }
 
-    async sendMessage(
-        sessionId: string,
-        payload: { text: string; localId?: string | null; sentFrom?: 'telegram-bot' | 'webapp' }
-    ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+    async fetchMessages(sessionId: string): Promise<FetchMessagesResult> {
+        try {
+            const stored = this.store.getMessages(sessionId, 200)
+            const messages: DecryptedMessage[] = stored.map((m) => ({
+                id: m.id,
+                seq: m.seq,
+                localId: m.localId,
+                content: m.content,
+                createdAt: m.createdAt
+            }))
+            this.sessionMessages.set(sessionId, messages)
+            return { ok: true, messages }
+        } catch (error) {
+            return { ok: false, status: null, error: error instanceof Error ? error.message : 'Failed to load messages' }
+        }
+    }
+
+    async sendMessage(sessionId: string, payload: { text: string; localId?: string | null; sentFrom?: 'telegram-bot' | 'webapp' | 'lark' }): Promise<void> {
+        const sentFrom = payload.sentFrom ?? 'webapp'
+
+        const content = {
+            role: 'user',
+            content: {
+                type: 'text',
+                text: payload.text
+            },
+            meta: {
+                sentFrom
+            }
+        }
+
+        const msg = this.store.addMessage(sessionId, content, payload.localId ?? undefined)
+
+        const update = {
+            id: msg.id,
+            seq: Date.now(),
+            createdAt: msg.createdAt,
+            body: {
+                t: 'new-message' as const,
+                sid: sessionId,
+                message: {
+                    id: msg.id,
+                    seq: msg.seq,
+                    createdAt: msg.createdAt,
+                    localId: msg.localId,
+                    content: msg.content
+                }
+            }
+        }
+        this.io.of('/cli').to(`session:${sessionId}`).emit('update', update)
+
+        // Keep a small in-memory cache for Telegram rendering.
+        const cached = this.sessionMessages.get(sessionId) ?? []
+        cached.push({ id: msg.id, seq: msg.seq, localId: msg.localId, content: msg.content, createdAt: msg.createdAt })
+        this.sessionMessages.set(sessionId, cached.slice(-200))
+
+        this.emit({
+            type: 'message-received',
+            sessionId,
+            message: {
+                id: msg.id,
+                seq: msg.seq,
+                localId: msg.localId,
+                content: msg.content,
+                createdAt: msg.createdAt
+            }
+        })
     }
 
     async approvePermission(
@@ -293,6 +355,11 @@ export class SyncEngine {
 
     async readSessionFile(sessionId: string, path: string): Promise<RpcReadFileResponse> {
         return await this.rpcGateway.readSessionFile(sessionId, path)
+    }
+
+    async writeSessionFile(sessionId: string, path: string, content: string): Promise<{ success: boolean; hash?: string; error?: string }> {
+        const base64Content = Buffer.from(content).toString('base64')
+        return await this.sessionRpc(sessionId, 'writeFile', { path, content: base64Content, expectedHash: null }) as { success: boolean; hash?: string; error?: string }
     }
 
     async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {
