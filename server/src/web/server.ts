@@ -18,6 +18,7 @@ import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
 import { createLarkWebhookRoutes } from './routes/lark'
 import { createLarkActionRoutes } from './routes/larkAction'
+import type { LarkWipNotifier } from '../lark/larkWipNotifier'
 import type { SSEManager } from '../sse/sseManager'
 import type { Server as BunServer } from 'bun'
 import type { Server as SocketEngine } from '@socket.io/bun-engine'
@@ -55,6 +56,7 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
 function createWebApp(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
+    getLarkNotifier?: () => LarkWipNotifier | null
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
@@ -91,6 +93,7 @@ function createWebApp(options: {
     app.route('/api', createGitRoutes(options.getSyncEngine))
     app.route('/api', createLarkWebhookRoutes({
         getSyncEngine: options.getSyncEngine,
+        getLarkNotifier: options.getLarkNotifier,
         verificationToken: configuration.larkVerificationToken,
         appId: configuration.larkAppId,
         appSecret: configuration.larkAppSecret,
@@ -181,6 +184,7 @@ function createWebApp(options: {
 export async function startWebServer(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
+    getLarkNotifier?: () => LarkWipNotifier | null
     jwtSecret: Uint8Array
     store: Store
     vapidPublicKey: string
@@ -191,6 +195,7 @@ export async function startWebServer(options: {
     const app = createWebApp({
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
+        getLarkNotifier: options.getLarkNotifier,
         jwtSecret: options.jwtSecret,
         store: options.store,
         vapidPublicKey: options.vapidPublicKey,
