@@ -28,6 +28,7 @@ export interface Settings {
 
     // Lark (Feishu) - WIP notification-only config
     larkEnabled?: boolean
+    larkUseWebSocket?: boolean
     larkNotifyTargets?: string[]
 
     // Lark (Feishu) - credentials (WIP)
