@@ -837,53 +837,61 @@ export class Store {
         return result.changes > 0
     }
 
-    /**
-     * Delete a session and all associated data.
-     * Messages are automatically cascade-deleted via foreign key constraint.
-     * Todos are stored in the sessions.todos column and deleted with the row.
-     */
-    deleteSession(id: string, namespace: string): boolean {
-        const result = this.db.prepare(
-            'DELETE FROM sessions WHERE id = ? AND namespace = ?'
-        ).run(id, namespace)
-        return result.changes > 0
-    }
+    getStats(): {
+        totalSessions: number
+        totalMachines: number
+        totalMessages: number
+        sessionsByDay: Array<{ date: string; count: number }>
+        messagesByDay: Array<{ date: string; count: number }>
+        modelStats: Record<string, number>
+        oldestSessionDate: number | null
+        newestSessionDate: number | null
+    } {
+        const totalSessions = (this.db.prepare('SELECT COUNT(*) as count FROM sessions').get() as { count: number }).count
+        const totalMachines = (this.db.prepare('SELECT COUNT(*) as count FROM machines').get() as { count: number }).count
+        const totalMessages = (this.db.prepare('SELECT COUNT(*) as count FROM messages').get() as { count: number }).count
 
-    addPushSubscription(
-        namespace: string,
-        subscription: { endpoint: string; p256dh: string; auth: string }
-    ): void {
-        const now = Date.now()
-        this.db.prepare(`
-            INSERT INTO push_subscriptions (
-                namespace, endpoint, p256dh, auth, created_at
-            ) VALUES (
-                @namespace, @endpoint, @p256dh, @auth, @created_at
-            )
-            ON CONFLICT(namespace, endpoint)
-            DO UPDATE SET
-                p256dh = excluded.p256dh,
-                auth = excluded.auth,
-                created_at = excluded.created_at
-        `).run({
-            namespace,
-            endpoint: subscription.endpoint,
-            p256dh: subscription.p256dh,
-            auth: subscription.auth,
-            created_at: now
-        })
-    }
+        const sessionsByDayRows = this.db.prepare(`
+            SELECT date(created_at / 1000, 'unixepoch', 'localtime') as date, COUNT(*) as count
+            FROM sessions
+            GROUP BY date
+            ORDER BY date ASC
+        `).all() as Array<{ date: string; count: number }>
 
-    removePushSubscription(namespace: string, endpoint: string): void {
-        this.db.prepare(
-            'DELETE FROM push_subscriptions WHERE namespace = ? AND endpoint = ?'
-        ).run(namespace, endpoint)
-    }
+        const messagesByDayRows = this.db.prepare(`
+            SELECT date(created_at / 1000, 'unixepoch', 'localtime') as date, COUNT(*) as count
+            FROM messages
+            GROUP BY date
+            ORDER BY date ASC
+        `).all() as Array<{ date: string; count: number }>
 
-    getPushSubscriptionsByNamespace(namespace: string): StoredPushSubscription[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM push_subscriptions WHERE namespace = ? ORDER BY created_at DESC'
-        ).all(namespace) as DbPushSubscriptionRow[]
-        return rows.map(toStoredPushSubscription)
+        const modelStatsRows = this.db.prepare(`
+            SELECT json_extract(metadata, '$.flavor') as model, COUNT(*) as count
+            FROM sessions
+            WHERE json_extract(metadata, '$.flavor') IS NOT NULL
+            GROUP BY model
+        `).all() as Array<{ model: string | null; count: number }>
+
+        const modelStats: Record<string, number> = {}
+        for (const row of modelStatsRows) {
+            if (row.model) {
+                modelStats[row.model] = row.count
+            }
+        }
+
+        const dateRange = this.db.prepare(`
+            SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM sessions
+        `).get() as { oldest: number | null; newest: number | null }
+
+        return {
+            totalSessions,
+            totalMachines,
+            totalMessages,
+            sessionsByDay: sessionsByDayRows,
+            messagesByDay: messagesByDayRows,
+            modelStats,
+            oldestSessionDate: dateRange.oldest,
+            newestSessionDate: dateRange.newest
+        }
     }
 }
